@@ -25,7 +25,7 @@ int    nblocks, ninodes, bmap, imap, inode_start;
 char   line[256], cmd[32], pathname[256], arg2[256];
 
 #include "util.c"
-#include "cd_ls_pwd.c"
+#include "EXT_functions.c"
 
 int init()
 {
