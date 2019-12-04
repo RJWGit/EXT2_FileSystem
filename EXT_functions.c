@@ -137,7 +137,6 @@ int list_dir(){
   char sbuf[BLKSIZE];
   char *cp, temp[256]; 
   DIR *dp; 
-  struct dirent *ptr;
 
   //Get minode from cwd if no pathname provided
   if(strcmp(pathname, "") == 0){
@@ -165,7 +164,7 @@ int list_dir(){
       strncpy(temp, dp->name, dp->name_len); 
       temp[dp->name_len] = 0; 
       //printf("%8d%8d%8u %s\n", dp->inode, dp->rec_len, dp->name_len, temp);
-       list_file(dp->inode,temp);
+      list_file(dp->inode,temp);
 
       //printf("Legnth of dir %d\n",dp->rec_len);
       cp += dp->rec_len; 
@@ -185,7 +184,7 @@ int rpwd(MINODE *wd){
     return 0;
     
   myino = wd->ino;
-  //printf("RWPD INO:%d\n", myino);
+  printf("RWPD INO:%d\n", myino);
 
   parentino = get_myino(wd);
 
@@ -507,4 +506,244 @@ int readlink(){
 }
 
 
+int closeFile(int fd){
+  //int fd = findFdByName(filename);
+  if(fd == -1){
+    printf("Which file to close? (give fd)\n");
+    scanf("%d",&fd);
+  }
+  // //clear stdin buffer
+  // while ((getchar()) != '\n'); 
+
+  MINODE *mip;
+  if ((fd>8)||(fd<0)){
+    printf("Error: Invalid file descriptor \n");
+    return 1;
+  }
+
+  if (running->fd[fd]==NULL)
+	{
+		printf("Error: File descriptor not found \n");
+		return 1;
+	}
+
+  OFT* oftp = running->fd[fd];
+  running->fd[fd] = 0;
+  oftp->refCount--;
+  
+  if (oftp->refCount > 0)
+		return 0;
+
+  //No more refrences of minode
+  mip = oftp->mptr;
+  iput(mip);
+  
+  return 0;
+}
+
+int pfd(){
+  int i;
+  printf("\n---------------------------------------\n");
+	printf("FD\tmode\toffset\tINODE\n");
+  
+	for(i = 0;i<8;i++)
+	{
+		if (running->fd[i]!= 0)
+		{ 
+			printf("%d\t",i);
+			switch(running->fd[i]->mode)
+			{
+				case 0:
+					printf("READ\t");
+					break;
+				case 1:
+					printf("WRITE\t");
+					break;
+				case 2:
+					printf("R/W\t");
+					break;
+				case 3:
+					printf("APPEND\t");
+					break;
+				default:
+					printf("Error\t");
+					break;
+			}
+			printf("%d\t",running->fd[i]->offset);
+      printf("[%d, %d]\n",running->fd[i]->mptr->dev, running->fd[i]->mptr->ino);
+
+		}
+	}
+	return 0;
+}
+
+int openFile(char *filename){
+  int dev, ino, index, mode;
+  OFT *fp;
+  MINODE *mip;
+
+  printf("What mode to open file with? |0(R)|1(W)|2(RW)|3(Append)|\n");
+  scanf("%d",&mode);
+
+  // //Clear stdin buffer
+  // while ((getchar()) != '\n'); 
+
+  printf("mode: %d\n", mode);
+  printf("Letter:%c\n",filename[0]);
+
+  if(filename[0] == '\0'){
+    printf("No filename given\n");
+    return 1;
+  }
+
+
+  if(filename[0] == '/')
+    dev = root->dev;
+  else
+    dev = running->cwd->dev;
+
+  ino = getino(filename);
+
+
+  //TODO: if ino is 0 then create new file with given pathname and mode with
+  if(ino == 0){
+    printf("Error: Could not find inode of given name\n");
+    return 1;
+  }
+  
+  mip = iget(dev,ino);
+
+  if (!S_ISREG(mip->INODE.i_mode)){
+    printf("Not a regular file\n");
+    return 1;
+  }
+
+
+  if(isFileOpen(mip) == 1)
+    return 1;
+
+  index = falloc();
+
+  if(index == -1){
+    printf("No aviable spots in process\n");
+    return 1;
+  }
+
+  fp = malloc(sizeof(OFT));
+
+  fp->mode = mode;
+  fp->refCount = 1;
+  fp->mptr = mip;
+  
+  getchar();
+  switch (mode)
+  {
+    case 0: fp->offset = 0; //Read
+            mip->INODE.i_atime = time(0L);
+            break;
+    case 1: truncate(mip); //Write
+            fp->offset = 0; 
+            mip->INODE.i_mtime = time(0L);
+            break;
+    case 2: fp->offset = 0; //ReadWrite
+            mip->INODE.i_mtime = time(0L);
+            break;
+    case 3: fp->offset = mip->INODE.i_size; //Append
+            mip->INODE.i_mtime = time(0L);
+            break;
+    default: printf("Invalid mode\n");
+             return 1;
+  }
+
+  running->fd[index] = fp;
+  mip->dirty = 1;
+  iput(mip);
+  return index;
+} 
+
+int read_file(int fd ,char *buf){
+  // int nbytes, fd;
+
+  // printf("Enter fd\n");
+  // scanf("&d", &fd);
+
+  // printf("Enter bytes to be readd\n");
+  // scanf("&d", &nbytes);
+
+  int nbytes = BLKSIZE;
+
+  if ((fd>7)||(fd<0))
+	{
+		printf("Invalid file descriptor\n");
+		return 1;
+	}
+
+  if(running->fd[fd]->mode != 0 &&running->fd[fd]->mode!=2){
+   	printf("File is not open for read\n");
+		return 1; 
+  }
+
+  return(myread(fd, buf, nbytes));
+
+}
+
+int write_file(){
+  int fd, size;
+  char string[255];
+
+  printf("Enter fd\n");
+  scanf("%d", &fd);
+
+  printf("Enter text to write to file\n");
+  scanf("%s", string);
+
+  printf("FD NUMBER: %d\n", fd);
+  if ((fd>7)||(fd<0))
+	{
+		printf("Invalid file descriptor\n");
+		return 1;
+	}
+
+  if(running->fd[fd]->mode != 1 &&running->fd[fd]->mode!=2){
+   	printf("File is not open for write\n");
+		return 1; 
+  }
+
+  size = getSizeofString(string);
+  // printf("%s\n",string);
+  return(mywrite(fd, string, size));
+} 
+
+int cat(char *filename){
+  char buf[255];
+  int n;
+  int fd;
+
+  
+
+  if(filename[0] == 0){
+    printf("Enter name of file\n");
+    scanf("%s", filename);
+
+    if(filename[0] == 0){
+      printf("Filename can not be empty\n");
+      return 1;
+    }
+
+  }
+
+  fd = openFile(filename);
+
+  while(n = read_file(fd, buf)){
+    buf[n] = 0;
+    printf("\nOutput: %s\n", buf);
+
+    // for(int i = 0; i<n; i++){
+    //   printf("%c", globalreadbuf[i]);
+    // }
+  }
+  closeFile(fd);
+
+  return 1;
+}
 

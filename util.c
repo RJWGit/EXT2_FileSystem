@@ -95,11 +95,11 @@ int iput(MINODE *mip)
  //TODO
  //Figure out out how to deal with this with root ref count > 0 at all times, 
  //impossible to update root inode with this line enabled
- //  if (mip->refCount > 0) return 1;
-  if (mip->dirty == 0)       return 1;
+ //if (mip->refCount > 0) return 1;
+ if (mip->dirty == 0)       return 1;
  
  /* write back */
- printf("iput: dev=%d ino=%d\n", mip->dev, mip->ino); 
+ //printf("iput: dev=%d ino=%d\n", mip->dev, mip->ino); 
 
  block =  ((mip->ino - 1) / 8) + inode_start;
  offset =  (mip->ino - 1) % 8;
@@ -355,7 +355,7 @@ int createInodeFile(int ino, int blk){
   ip->i_uid = running->uid; // owner uid 
   ip->i_gid = running->pid; // group Id 
   ip->i_size = 0; // size in bytes 
-  ip->i_links_count = 1; // links count=2 because of . and .. 
+  ip->i_links_count = 1;
   ip->i_atime = ip->i_ctime = ip->i_mtime = time(0L); 
   ip->i_blocks = 2; // LINUX: Blocks count in 512-byte chunks 
   //ip->i_block[0] = blk; // new DIR has one data block 
@@ -515,7 +515,7 @@ int idalloc(int dev, int ino)  // deallocate an ino number
 
   if (ino > ninodes){
     printf("inumber %d out of range\n", ino);
-    return;
+    return 1;
   }
 
   // get inode bitmap block
@@ -552,7 +552,7 @@ int bdalloc(int dev, int blk) // deallocate a blk number
 
   if (blk > nblocks){
     printf("blk %d out of range\n", blk);
-    return;
+    return 1;
   }
 
   // get blk bitmap block
@@ -694,4 +694,325 @@ int rmChild(MINODE *pmip, char *name){
     pmip->INODE.i_links_count -= 1;
     iput(pmip);
     put_block(pmip->dev, pmip->INODE.i_block[i], sbuf);
+}
+
+//Check if file is open
+int isFileOpen(MINODE *mip){
+  for(int i=0; i<8; i++){
+    if(running->fd[i] != 0){
+      if (running->fd[i]->mptr == mip){
+        if (running->fd[i]->mode>-1){
+          printf("Error: File already open\n");
+          return 1;
+        }
+      }
+    }
+	}
+
+  return 0;
+}
+
+//Check if running process has room for new file and return open slot if so
+int falloc(){
+  int i;
+
+  for(i = 0;i<8;i++){
+    if(running->fd[i] == 0)
+      return i;
+  }
+
+  return -1;
+}
+
+//TODO: 
+int truncate(MINODE *mip){
+  int *indirect, *dindirect;
+  char buf[BLKSIZE], buf2[BLKSIZE];
+
+  //Free direct blocks
+  for(int i=0; i<12; i++){
+    if(mip->INODE.i_block[i] != 0){
+      bdalloc(mip->dev,mip->INODE.i_block[i]);
+      mip->INODE.i_block[i] = 0;
+    }
+  }
+
+  //Free indirect blocks
+  if(mip->INODE.i_block[12] != 0){
+    get_block(dev,mip->INODE.i_block[12],buf);
+    indirect = (int *)buf;
+
+    for(int i=0; i<256; i++){
+      if(*indirect != 0){
+        bdalloc(mip->dev,*indirect);
+        *indirect = 0;
+        indirect++;
+      }
+    }
+
+    mip->INODE.i_block[12] = 0;
+  }
+
+  //Free double indirect blocks
+  if(mip->INODE.i_block[13] != 0){
+    get_block(dev,mip->INODE.i_block[13],buf);
+    dindirect = (int *)buf;
+
+    for(int i=0; i<255; i++){
+      if(*dindirect != 0){
+       get_block(dev,*dindirect,buf2);
+       indirect = (int *)buf2;
+       
+       for(int j=0; j<255; j++){
+         if(*indirect != 0){
+          bdalloc(mip->dev,*indirect);
+          *indirect = 0;
+         }
+        indirect++;
+       }
+      }
+      dindirect++;
+    }
+    mip->INODE.i_block[13] = 0;
+  }
+
+  mip->INODE.i_atime = time(0L);
+  mip->INODE.i_mtime = time(0L); 
+  mip->INODE.i_size = 0;
+  mip->dirty = 1;
+}
+
+int findFdByName(char *filename){
+  int i;
+  int dev, ino;
+  MINODE *mip;
+
+  if(filename[0] == '\0'){
+    printf("No filename given\n");
+    return 1;
+  }
+
+  if(filename[0] == '/')
+    dev = root->dev;
+  else
+    dev = running->cwd->dev;
+
+  ino = getino(filename);
+
+  if(ino == 0){
+    printf("Error: Could not find inode of given name\n");
+    return 1;
+  }
+  
+  mip = iget(dev,ino);
+
+  for(i = 0;i<8;i++){
+    if(running->fd[i]->mptr == mip)
+      return i;
+  }
+
+  return -1;
+}
+
+//Not working
+int findInodeName(MINODE *mip,int ino, char *filename){
+  char sbuf[BLKSIZE];
+  char *cp; 
+  char temp[255];
+  DIR *dp; 
+
+  for(int i = 0; i < 12; i++){
+    if (mip->INODE.i_block[i] == 0){ 
+      return 0;}
+    
+    get_block(dev,mip->INODE.i_block[i],sbuf);
+    dp = (DIR *)sbuf; 
+    cp = sbuf; 
+
+    while (cp < sbuf + BLKSIZE){ 
+      strncpy(temp, dp->name, dp->name_len); 
+      temp[dp->name_len] = 0; 
+
+      if(dp->inode == ino){
+        printf("FOUND\n");
+        strcpy(filename,temp);
+
+        return 0;
+      }
+
+      if(strcmp(filename, " ")== 0){
+        MINODE *child = iget(dev,dp->inode);
+        findInodeName(child,ino, &filename);
+        iput(child);
+      }
+      cp += dp->rec_len; 
+      dp = (DIR *)cp; 
+      } 
+
+  }
+}
+
+int lseekFile(int fd, int postion){
+  int originalpos;
+
+  if(running->fd[fd]->mptr->INODE.i_size < postion){
+    printf("Postion is outside of file\n");
+    return 1;
+  }
+
+  if(postion < 0){
+    printf("Position can not be negative\n");
+    return 1;
+  }
+
+  originalpos = running->fd[fd]->offset;
+  running->fd[fd]->offset = postion;
+
+  return originalpos;
+
+  
+}
+
+int myread(int fd, char *buf, int nbytes){
+  int count = 0;
+  int filesize = running->fd[fd]->mptr->INODE.i_size;
+  int offset =running->fd[fd]->offset;
+  int avil = filesize - offset;
+  int lbk, startbyte, blk;
+  int remain;
+  int *indirect, *dindirect;
+  char *cq = buf;
+  char *cp;
+  char readbuf[BLKSIZE];
+  char indirbuf[BLKSIZE], dindirbuf[BLKSIZE];
+
+
+  while(nbytes > 0 && avil >0){
+    lbk = offset / BLKSIZE;
+    startbyte = offset % BLKSIZE;
+
+    if(lbk<12){
+      blk = running->fd[fd]->mptr->INODE.i_block[lbk];
+      printf("direct\n");
+    }
+    //  indirect blocks 
+    else if (lbk >= 12 && lbk < 256 + 12) { 
+      get_block(running->fd[fd]->mptr->dev,running->fd[fd]->mptr->INODE.i_block[12],indirbuf);
+      indirect = (int *)indirbuf;
+      blk = *(indirect+lbk-12);
+      printf("indirect\n");
+
+    }
+
+    else{ 
+      get_block(running->fd[fd]->mptr->dev,running->fd[fd]->mptr->INODE.i_block[13],dindirbuf);
+      dindirect = (int *)dindirbuf;
+
+      blk = *(dindirect + ((lbk-268)/256));
+      get_block(running->fd[fd]->mptr->dev,blk,indirbuf);
+  
+      indirect = (int *)indirbuf;
+      blk = *(indirect+((lbk-268)%256));
+      printf("dindirect\n");
+
+    } 
+
+    get_block(running->fd[fd]->mptr->dev, blk, readbuf);
+
+    cp = readbuf + startbyte;
+    remain = BLKSIZE - startbyte;
+
+    while(remain > 0){
+      *cq = *cp;
+      cq++;
+      cp++;
+      // printf("%c", *cp);
+      running->fd[fd]->offset++;
+      count++;
+      avil--;
+      nbytes--;
+      remain--;
+
+      if(nbytes <= 0 || avil <= 0){
+        break;
+      }
+
+    }
+  }
+  printf("myread: read %d char from file descriptor %d\n", count, fd);  
+  return count;
+}
+
+int mywrite(int fd, char *buf, int nbytes){
+  int offset =running->fd[fd]->offset;
+  int lbk, startbyte, blk;
+  int remain;
+  int *indirect, *dindirect;
+  char *cq = buf;
+  char *cp;
+  char writebuf[BLKSIZE];
+  char indirbuf[BLKSIZE], dindirbuf[BLKSIZE];
+  printf("%s\n", buf);
+
+
+  while(nbytes > 0){
+    lbk = offset / BLKSIZE;
+    startbyte = offset % BLKSIZE;
+
+    if(lbk<12){
+      if(running->fd[fd]->mptr->INODE.i_block[lbk] == 0){
+        running->fd[fd]->mptr->INODE.i_block[lbk] = balloc(running->fd[fd]->mptr->dev);
+      }
+      blk = running->fd[fd]->mptr->INODE.i_block[lbk];
+      printf("direct\n");
+    }
+    // //  indirect blocks 
+    // else if (lbk >= 12 && lbk < 256 + 12) { 
+    //   get_block(running->fd[fd]->mptr->dev,running->fd[fd]->mptr->INODE.i_block[12],indirbuf);
+    //   indirect = (int *)indirbuf;
+    //   blk = *(indirect+lbk-12);
+    //   printf("indirect\n");
+
+    // }
+
+    // else{ 
+    //   get_block(running->fd[fd]->mptr->dev,running->fd[fd]->mptr->INODE.i_block[13],dindirbuf);
+    //   dindirect = (int *)dindirbuf;
+
+    //   blk = *(dindirect + ((lbk-268)/256));
+    //   get_block(running->fd[fd]->mptr->dev,blk,indirbuf);
+  
+    //   indirect = (int *)indirbuf;
+    //   blk = *(indirect+((lbk-268)%256));
+    //   printf("dindirect\n");
+
+    // } 
+
+    get_block(running->fd[fd]->mptr->dev, blk, writebuf);
+
+    cp = writebuf + startbyte;
+    remain = BLKSIZE - startbyte;
+
+    while(remain > 0){
+      *cp++ = *cq++;
+      running->fd[fd]->offset++;
+      nbytes--;
+      remain--;
+
+      if (running->fd[fd]->offset > running->fd[fd]->mptr->INODE.i_size){
+        running->fd[fd]->mptr->INODE.i_size++;
+      }
+
+      if(nbytes <= 0){
+        break;
+      }
+
+    }
+
+    put_block(running->fd[fd]->mptr->dev,blk,writebuf);
+  }
+
+  running->fd[fd]->mptr->dirty = 1;
+  iput(running->fd[fd]->mptr);
+  return nbytes;
 }

@@ -105,9 +105,8 @@ int main(int argc, char *argv[ ])
   running->cwd = iget(dev, 2);
   printf("root refCount = %d\n", root->refCount);
 
-  //printf("hit a key to continue : "); getchar();
   while(1){
-    printf("input command : [ls|cd|pwd|mkdir|creat|rmdir|link|unlink|symlink|readlink|quit] ");
+    printf("input command : [ls|cd|pwd|mkdir|creat|rmdir|link|unlink|symlink|readlink|open|close|pfd|cat|write|quit] ");
     fgets(line, 128, stdin);
     line[strlen(line)-1] = 0;
     if (line[0]==0)
@@ -142,6 +141,16 @@ int main(int argc, char *argv[ ])
       symlink(); 
     if (strcmp(cmd, "readlink")==0)
       readlink();   
+    if (strcmp(cmd, "open")==0)
+      openFile(pathname);   
+    if (strcmp(cmd, "close")==0)
+      closeFile(-1);   
+    if (strcmp(cmd, "pfd")==0)
+      pfd();   
+    if (strcmp(cmd, "cat")==0)
+      cat(pathname); 
+    if (strcmp(cmd, "write")==0)
+      write_file();   
     if (strcmp(cmd, "quit")==0)
       quit();
     
