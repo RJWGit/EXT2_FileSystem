@@ -142,7 +142,7 @@ int main(int argc, char *argv[ ])
     if (strcmp(cmd, "readlink")==0)
       readlink();   
     if (strcmp(cmd, "open")==0)
-      openFile(pathname);   
+      openFile(pathname, -1);   
     if (strcmp(cmd, "close")==0)
       closeFile(-1);   
     if (strcmp(cmd, "pfd")==0)

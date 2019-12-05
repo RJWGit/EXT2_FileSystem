@@ -480,7 +480,6 @@ int newDirEntry(MINODE *mip, int ino, char *name, char type){
 
 //Not including null term
 int getSizeofString(char *str){
-
   for(int i = 0; i < 255; i++){
     if(str[i] == '\0'){
       return i;
@@ -724,7 +723,6 @@ int falloc(){
   return -1;
 }
 
-//TODO: 
 int truncate(MINODE *mip){
   int *indirect, *dindirect;
   char buf[BLKSIZE], buf2[BLKSIZE];
@@ -951,7 +949,7 @@ int mywrite(int fd, char *buf, int nbytes){
   char *cq = buf;
   char *cp;
   char writebuf[BLKSIZE];
-  char indirbuf[BLKSIZE], dindirbuf[BLKSIZE];
+  int indirbuf[256], dindirbuf[256];
   printf("%s\n", buf);
 
 
@@ -959,6 +957,7 @@ int mywrite(int fd, char *buf, int nbytes){
     lbk = offset / BLKSIZE;
     startbyte = offset % BLKSIZE;
 
+    //Direct blocks
     if(lbk<12){
       if(running->fd[fd]->mptr->INODE.i_block[lbk] == 0){
         running->fd[fd]->mptr->INODE.i_block[lbk] = balloc(running->fd[fd]->mptr->dev);
@@ -966,33 +965,65 @@ int mywrite(int fd, char *buf, int nbytes){
       blk = running->fd[fd]->mptr->INODE.i_block[lbk];
       printf("direct\n");
     }
-    // //  indirect blocks 
-    // else if (lbk >= 12 && lbk < 256 + 12) { 
-    //   get_block(running->fd[fd]->mptr->dev,running->fd[fd]->mptr->INODE.i_block[12],indirbuf);
-    //   indirect = (int *)indirbuf;
-    //   blk = *(indirect+lbk-12);
-    //   printf("indirect\n");
 
-    // }
+    //Indirect blocks 
+    else if (lbk >= 12 && lbk < 256 + 12) { 
 
-    // else{ 
-    //   get_block(running->fd[fd]->mptr->dev,running->fd[fd]->mptr->INODE.i_block[13],dindirbuf);
-    //   dindirect = (int *)dindirbuf;
+      //Allocate new block
+      if(running->fd[fd]->mptr->INODE.i_block[12] == 0){
+        running->fd[fd]->mptr->INODE.i_block[12] = balloc(running->fd[fd]->mptr->dev);  
+        memset(running->fd[fd]->mptr->INODE.i_block[12], 0, BLKSIZE);  //Set all entries to 0
+      }
 
-    //   blk = *(dindirect + ((lbk-268)/256));
-    //   get_block(running->fd[fd]->mptr->dev,blk,indirbuf);
-  
-    //   indirect = (int *)indirbuf;
-    //   blk = *(indirect+((lbk-268)%256));
-    //   printf("dindirect\n");
 
-    // } 
+      get_block(running->fd[fd]->mptr->dev,running->fd[fd]->mptr->INODE.i_block[12],indirbuf);
+      blk = indirbuf[lbk - 12];
+
+      if(blk == 0){
+        indirbuf[lbk - 12] = balloc(running->fd[fd]->mptr->dev);
+        blk = indirbuf[lbk - 12];
+        put_block(running->fd[fd]->mptr->dev, running->fd[fd]->mptr->INODE.i_block[12], (char*)indirbuf);
+      }
+    }
+
+    //Double indirect blocks
+    else{ 
+
+       //Allocate new block
+      if(running->fd[fd]->mptr->INODE.i_block[13] == 0){
+        running->fd[fd]->mptr->INODE.i_block[13] = balloc(running->fd[fd]->mptr->dev);  
+        memset(running->fd[fd]->mptr->INODE.i_block[13], 0, BLKSIZE);  //Set all entries to 0
+      } 
+
+      int locallbk1, locallbk2;
+      locallbk1 = (lbk - 268)/256;
+      locallbk2 = (lbk - 268)%256;
+
+      get_block(running->fd[fd]->mptr->dev, running->fd[fd]->mptr->INODE.i_block[13], (char*)dindirbuf);
+
+      if(dindirbuf[locallbk1] == 0){
+        dindirbuf[locallbk1] = balloc(running->fd[fd]->mptr->dev);
+      }
+
+      memset(indirbuf, 0, BLKSIZE);  //Set all entries to 0
+      get_block(running->fd[fd]->mptr->dev, dindirbuf[locallbk1], (char*)indirbuf);
+
+       if(indirbuf[locallbk2] == 0){
+        indirbuf[locallbk2] = balloc(running->fd[fd]->mptr->dev);
+        blk = indirbuf[locallbk2];
+        put_block(running->fd[fd]->mptr->dev, dindirbuf[locallbk1], indirbuf[locallbk2]);
+      }
+
+    put_block(running->fd[fd]->mptr->dev, running->fd[fd]->mptr->INODE.i_block[13], dindirbuf[locallbk1]);
+
+    } 
 
     get_block(running->fd[fd]->mptr->dev, blk, writebuf);
 
     cp = writebuf + startbyte;
     remain = BLKSIZE - startbyte;
 
+    //Copy bytes from buffer block into read buffer
     while(remain > 0){
       *cp++ = *cq++;
       running->fd[fd]->offset++;

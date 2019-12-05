@@ -541,6 +541,7 @@ int closeFile(int fd){
   return 0;
 }
 
+//Print open file descriptor
 int pfd(){
   int i;
   printf("\n---------------------------------------\n");
@@ -577,13 +578,16 @@ int pfd(){
 	return 0;
 }
 
-int openFile(char *filename){
-  int dev, ino, index, mode;
+int openFile(char *filename, int mode){
+  int dev, ino, index;
   OFT *fp;
   MINODE *mip;
 
-  printf("What mode to open file with? |0(R)|1(W)|2(RW)|3(Append)|\n");
-  scanf("%d",&mode);
+  if(mode == -1){
+    pfd();
+    printf("What mode to open file with? |0(R)|1(W)|2(RW)|3(Append)|\n");
+    scanf("%d",&mode);
+  }
 
   // //Clear stdin buffer
   // while ((getchar()) != '\n'); 
@@ -635,7 +639,6 @@ int openFile(char *filename){
   fp->refCount = 1;
   fp->mptr = mip;
   
-  getchar();
   switch (mode)
   {
     case 0: fp->offset = 0; //Read
@@ -691,11 +694,17 @@ int write_file(){
   int fd, size;
   char string[255];
 
+  //Print open FDs
+  pfd();
   printf("Enter fd\n");
   scanf("%d", &fd);
 
+  while ((getchar()) != '\n'); 
+
+  //TODO: Why is this printing "seg" sometimes
   printf("Enter text to write to file\n");
-  scanf("%s", string);
+  // scanf("%s", string);
+  fgets(string, 5, stdin);
 
   printf("FD NUMBER: %d\n", fd);
   if ((fd>7)||(fd<0))
@@ -709,7 +718,10 @@ int write_file(){
 		return 1; 
   }
 
-  size = getSizeofString(string);
+  size = strlen(string);
+  printf("Size num: %d\n", size);
+  printf("Size num: %s\n", string);
+
   // printf("%s\n",string);
   return(mywrite(fd, string, size));
 } 
@@ -720,7 +732,7 @@ int cat(char *filename){
   int fd;
 
   
-
+  //Check if filename is empty
   if(filename[0] == 0){
     printf("Enter name of file\n");
     scanf("%s", filename);
@@ -732,7 +744,7 @@ int cat(char *filename){
 
   }
 
-  fd = openFile(filename);
+  fd = openFile(filename, 0);
 
   while(n = read_file(fd, buf)){
     buf[n] = 0;
@@ -743,7 +755,6 @@ int cat(char *filename){
     // }
   }
   closeFile(fd);
-
-  return 1;
+  return 0;
 }
 
