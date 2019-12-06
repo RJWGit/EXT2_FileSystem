@@ -692,7 +692,7 @@ int read_file(int fd ,char *buf){
 
 int write_file(){
   int fd, size;
-  char string[255];
+  char string[BLKSIZE];
 
   //Print open FDs
   pfd();
@@ -727,7 +727,7 @@ int write_file(){
 } 
 
 int cat(char *filename){
-  char buf[255];
+  char buf[BLKSIZE];
   int n;
   int fd;
 

@@ -60,7 +60,7 @@ int mount_root()
   root = iget(dev, 2);
 }
 
-char *disk = "disk";
+char *disk = "mydisk";
 int main(int argc, char *argv[ ])
 {
   int ino;
